@@ -25,23 +25,46 @@
   ];
 
   var GIORNI = 15;
-  var H_FULL = 'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation_probability,precipitation,snowfall,weather_code,pressure_msl,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,visibility';
+  // solo le variabili usate davvero: meno variabili = meno "peso" sul limite gratuito di Open-Meteo
+  var H_FULL = 'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,pressure_msl,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index';
   var D_FULL = 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,snowfall_sum,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,uv_index_max,sunrise,sunset';
   var H_MIN = 'temperature_2m,precipitation,weather_code,pressure_msl,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m';
   var D_MIN = 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,sunrise,sunset';
 
   /* ---------- utilità ---------- */
+  // Errori con un motivo leggibile: e.tipo = 'limite' | 'tempo' | 'rete' | 'richiesta'
+  function errore(msg, tipo, status) { var e = new Error(msg); e.tipo = tipo; e.status = status || 0; return e; }
   function getJSON(url, ms) {
     var ctl = 'AbortController' in window ? new AbortController() : null;
-    var t = ctl ? setTimeout(function () { ctl.abort(); }, ms || 20000) : null;
-    return fetch(url, ctl ? { signal: ctl.signal } : {}).then(function (r) {
+    var t = ctl ? setTimeout(function () { ctl.abort(); }, ms || 30000) : null;
+    return fetch(url, ctl ? { signal: ctl.signal, cache: 'no-store' } : { cache: 'no-store' }).then(function (r) {
       if (t) clearTimeout(t);
       return r.json().catch(function () { return {}; }).then(function (j) {
-        if (!r.ok || j.error) { var e = new Error(j.reason || ('HTTP ' + r.status)); e.status = r.status; throw e; }
+        if (r.status === 429) throw errore('Limite di richieste raggiunto', 'limite', 429);
+        if (!r.ok || j.error) throw errore(j.reason || ('Errore del server (' + r.status + ')'), r.status >= 500 ? 'rete' : 'richiesta', r.status);
         return j;
       });
-    }, function (e) { if (t) clearTimeout(t); throw e; });
+    }, function (e) {
+      if (t) clearTimeout(t);
+      // una risposta 429 senza intestazioni CORS arriva al browser come "Failed to fetch"
+      throw errore(e && e.name === 'AbortError' ? 'Il server non ha risposto in tempo' : 'Connessione non riuscita', e && e.name === 'AbortError' ? 'tempo' : 'rete');
+    });
   }
+  function attendi(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  // un nuovo tentativo dopo una pausa per errori temporanei (rete, tempo, limite al minuto)
+  function conRiprova(fn, pausa) {
+    return fn().catch(function (e) {
+      if (e.tipo === 'richiesta') throw e;
+      return attendi(pausa || 2500).then(fn);
+    });
+  }
+  MC.messaggioErrore = function (e) {
+    if (!e) return 'Errore sconosciuto';
+    if (e.tipo === 'limite') return 'Il servizio meteo gratuito ha raggiunto il limite di richieste per la tua rete (capita sulle reti mobili condivise). Riprova tra qualche minuto o con il Wi-Fi.';
+    if (e.tipo === 'tempo') return 'Il servizio meteo è lento a rispondere. Riprova tra poco.';
+    if (e.tipo === 'rete') return 'Connessione al servizio meteo non riuscita. Controlla la rete e riprova.';
+    return e.message || String(e);
+  };
   function q(o) { return Object.keys(o).map(function (k) { return k + '=' + encodeURIComponent(o[k]); }).join('&'); }
   function num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
   function vals(a) { return a.filter(function (v) { return typeof v === 'number' && isFinite(v); }); }
@@ -134,29 +157,78 @@
   }
   MC.vota = vota;
 
-  /* ---------- download ---------- */
-  function scaricaModello(m, lat, lon) {
-    var base = 'https://api.open-meteo.com/v1/forecast?';
-    var p = { latitude: lat.toFixed(4), longitude: lon.toFixed(4), timezone: 'auto', forecast_days: GIORNI, models: m.id, wind_speed_unit: 'kmh' };
-    return getJSON(base + q(Object.assign({}, p, { hourly: H_FULL, daily: D_FULL })))
-      .catch(function (e) {
-        if (e.status === 400) return getJSON(base + q(Object.assign({}, p, { hourly: H_MIN, daily: D_MIN })));
-        throw e;
-      })
-      .then(function (j) {
-        var valido = j.daily && vals(j.daily.temperature_2m_max || []).length > 0;
-        if (!valido) throw new Error('nessun dato per questa zona');
-        return { id: m.id, nome: m.nome, ok: true, dati: j };
+  /* ---------- download ----------
+     1) UNA sola richiesta con tutti i modelli insieme (models=a,b,c): molto più leggera
+        per il limite gratuito di Open-Meteo rispetto a 12 richieste separate.
+     2) Se il server rifiuta la lista (es. un modello rinominato), si passa a una richiesta
+        per modello, al massimo 3 alla volta, e i modelli che falliscono vengono saltati. */
+  var BASE_F = 'https://api.open-meteo.com/v1/forecast?';
+  function parametri(lat, lon, models, completo) {
+    return q({
+      latitude: lat.toFixed(4), longitude: lon.toFixed(4), timezone: 'auto', forecast_days: GIORNI,
+      models: models, wind_speed_unit: 'kmh', hourly: completo ? H_FULL : H_MIN, daily: completo ? D_FULL : D_MIN
+    });
+  }
+  function haDati(d) { return d && d.daily && vals(d.daily.temperature_2m_max || []).length > 0; }
+
+  // separa la risposta multi-modello (chiavi "temperature_2m_ecmwf_ifs025") in una risposta per modello
+  function separa(j, m) {
+    function parte(blocco) {
+      if (!blocco) return null;
+      var out = { time: blocco.time };
+      Object.keys(blocco).forEach(function (k) {
+        var suf = '_' + m.id;
+        if (k.length > suf.length && k.slice(-suf.length) === suf) out[k.slice(0, -suf.length)] = blocco[k];
       });
+      // variabili non legate al modello (alba, tramonto) arrivano senza suffisso
+      ['sunrise', 'sunset'].forEach(function (k) { if (!out[k] && blocco[k]) out[k] = blocco[k]; });
+      return out;
+    }
+    return { timezone: j.timezone, utc_offset_seconds: j.utc_offset_seconds, elevation: j.elevation, hourly: parte(j.hourly), daily: parte(j.daily) };
+  }
+
+  function insieme(lista, lat, lon) {
+    var ids = lista.map(function (m) { return m.id; }).join(',');
+    return conRiprova(function () {
+      return getJSON(BASE_F + parametri(lat, lon, ids, true), 40000);
+    }).then(function (j) {
+      return lista.map(function (m) {
+        var d = separa(j, m);
+        return haDati(d) ? { id: m.id, nome: m.nome, ok: true, dati: d } : { id: m.id, nome: m.nome, ok: false, errore: 'nessun dato per questa zona' };
+      });
+    });
+  }
+
+  function unoPerUno(lista, lat, lon) {
+    var ris = [], i = 0;
+    function uno(m) {
+      return getJSON(BASE_F + parametri(lat, lon, m.id, true))
+        .catch(function (e) { if (e.tipo === 'richiesta') return getJSON(BASE_F + parametri(lat, lon, m.id, false)); throw e; })
+        .then(function (d) {
+          if (!haDati(d)) throw errore('nessun dato per questa zona', 'richiesta');
+          return { id: m.id, nome: m.nome, ok: true, dati: d };
+        })
+        .catch(function (e) { return { id: m.id, nome: m.nome, ok: false, errore: e.message, tipo: e.tipo }; });
+    }
+    function lavoratore() {
+      if (i >= lista.length) return Promise.resolve();
+      var k = i++;
+      return uno(lista[k]).then(function (r) { ris[k] = r; return lavoratore(); });
+    }
+    return Promise.all([lavoratore(), lavoratore(), lavoratore()]).then(function () { return ris; });
   }
 
   MC.scaricaPrevisioni = function (lat, lon, attivi) {
     var lista = MC.MODELLI.filter(function (m) { return !attivi || attivi[m.id] !== false; });
-    return Promise.all(lista.map(function (m) {
-      return scaricaModello(m, lat, lon).catch(function (e) { return { id: m.id, nome: m.nome, ok: false, errore: String(e.message || e) }; });
-    })).then(function (ris) {
+    return insieme(lista, lat, lon).catch(function (e) {
+      if (e.tipo === 'limite') throw e;   // inutile insistere: anche le richieste singole verrebbero rifiutate
+      return unoPerUno(lista, lat, lon);
+    }).then(function (ris) {
       var buoni = ris.filter(function (r) { return r.ok; });
-      if (!buoni.length) throw new Error('Nessun modello raggiungibile. Controlla la connessione.');
+      if (!buoni.length) {
+        var t = ris.filter(function (r) { return r.tipo; }).map(function (r) { return r.tipo; });
+        throw errore('Nessun modello disponibile per questo luogo', t.indexOf('limite') >= 0 ? 'limite' : t.indexOf('rete') >= 0 ? 'rete' : t.indexOf('tempo') >= 0 ? 'tempo' : 'richiesta');
+      }
       return { stato: ris.map(function (r) { return { id: r.id, nome: r.nome, ok: r.ok, errore: r.errore || null }; }), consenso: costruisciConsenso(buoni) };
     });
   };
@@ -399,11 +471,11 @@
   MC.scaricaLago = function (lago) {
     var url = 'https://api.open-meteo.com/v1/forecast?' + q({
       latitude: lago.lat.toFixed(4), longitude: lago.lon.toFixed(4), timezone: 'auto',
-      past_days: 31, forecast_days: GIORNI,
+      past_days: 21, forecast_days: GIORNI,
       daily: 'temperature_2m_mean,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant',
       hourly: 'wind_speed_10m,wind_gusts_10m,wind_direction_10m'
     });
-    return getJSON(url).then(function (j) {
+    return conRiprova(function () { return getJSON(url); }).then(function (j) {
       // Stima della temperatura dell'acqua: l'acqua segue l'aria con ritardo
       // (media mobile esponenziale; i laghi profondi reagiscono più lentamente).
       var d = j.daily, tau = lago.profondo ? 24 : 9, tw = null, stime = [];

@@ -1,10 +1,10 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "date": "2026-11-11",
   "notes": [
-    "Prima versione di MeteoConsenso",
-    "Previsioni di maggioranza da 12 modelli meteo, fino a 15 giorni",
-    "Pressione, vento, pioggia, nuvole, UV, mari, laghi, pollini e polveri sottili",
-    "Luoghi preferiti e recenti, widget per la schermata Home"
+    "Risolto: aggiornamento e cambio luogo che fallivano con \"problemi di connessione\"",
+    "Tutti i modelli ora arrivano con una sola richiesta, molto più leggera",
+    "Nuovo tentativo automatico se la rete o il servizio rispondono male",
+    "Messaggi di errore chiari e previsioni salvate sempre visibili"
   ]
 }

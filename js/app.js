@@ -82,7 +82,7 @@
     mostraLuogo();
     var c = leggiCache();
     if (c) { S.r = c; disegna(); }
-    else { $('#ora').innerHTML = '<div class="carica">Raccolgo le previsioni di tutti i modelli…</div>'; $('#giorni').innerHTML = ''; $('#dettaglio').innerHTML = ''; }
+    else { S.r = null; $('#tendenza').innerHTML = ''; $('#fonti').innerHTML = ''; $('#ora').innerHTML = '<div class="carica">Raccolgo le previsioni di tutti i modelli…</div>'; $('#giorni').innerHTML = ''; $('#dettaglio').innerHTML = ''; }
     carica(!c || Date.now() - c.quando > VALIDITA);
   }
   function mostraLuogo() {
@@ -131,31 +131,44 @@
     return MC.piuVicino(MC.LAGHI, S.luogo.lat, S.luogo.lon);
   }
 
+  // Ogni caricamento ha un numero: se nel frattempo cambi luogo, i risultati vecchi
+  // vengono scartati (prima finivano salvati sotto il luogo nuovo, o il nuovo non partiva).
+  var giro = 0;
   function carica(forza) {
-    if (S.carico) return;
+    if (S.carico && !forza) return;
     if (!forza && S.r && Date.now() - S.r.quando < VALIDITA) return;
-    if (!navigator.onLine) { if (S.r) avviso('Sei offline: mostro le ultime previsioni salvate.'); return; }
+    if (!navigator.onLine) { avviso(S.r ? 'Sei offline: mostro le ultime previsioni salvate.' : 'Sei offline: collegati a internet per scaricare le previsioni.'); return; }
+    var mio = ++giro;
     S.carico = true;
     $('#btnRicarica').classList.add('gira');
-    var l = S.luogo, d = S.dati;
+    var l = Object.assign({}, S.luogo), d = S.dati, chiave = MC.chiaveLuogo(l);
     var serveAria = d.uv || d.pollini || d.polveri;
     var pm = d.mari ? puntoMare() : null, pl = d.laghi ? lagoAttivo() : null;
-    Promise.all([
-      MC.scaricaPrevisioni(l.lat, l.lon, S.modelli),
-      serveAria ? MC.scaricaAria(l.lat, l.lon).catch(function () { return null; }) : null,
-      pm ? MC.scaricaMare(pm).then(function (j) { return { punto: pm, dati: j }; }).catch(function () { return { punto: pm, errore: true }; }) : null,
-      pl ? MC.scaricaLago(pl).then(function (j) { return { lago: pl, dati: j }; }).catch(function () { return { lago: pl, errore: true }; }) : null
-    ]).then(function (v) {
+    // prima le previsioni (la parte importante), poi i dati extra: così non si sommano tutte le richieste insieme
+    MC.scaricaPrevisioni(l.lat, l.lon, S.modelli).then(function (prev) {
+      return Promise.all([
+        serveAria ? MC.scaricaAria(l.lat, l.lon).catch(function () { return null; }) : null,
+        pm ? MC.scaricaMare(pm).then(function (j) { return { punto: pm, dati: j }; }).catch(function () { return { punto: pm, errore: true }; }) : null,
+        pl ? MC.scaricaLago(pl).then(function (j) { return { lago: pl, dati: j }; }).catch(function () { return { lago: pl, errore: true }; }) : null
+      ]).then(function (extra) { return [prev].concat(extra); });
+    }).then(function (v) {
+      if (mio !== giro || chiave !== MC.chiaveLuogo(S.luogo)) return;   // luogo cambiato nel frattempo
       S.r = { quando: Date.now(), consenso: v[0].consenso, stato: v[0].stato, aria: v[1], mare: v[2], lago: v[3] };
       if (S.giorno >= S.r.consenso.giorni.length) S.giorno = 0;
       salvaCache(S.r);
       disegna();
       salvaWidget();
     }).catch(function (e) {
-      if (!S.r) $('#ora').innerHTML = '<div class="carica">⚠️ ' + esc(e.message || e) + '<br><br><button class="btn" id="riprova">Riprova</button></div>';
-      var b = $('#riprova'); if (b) b.onclick = function () { carica(true); };
-      avviso('Aggiornamento non riuscito: ' + (e.message || e));
+      if (mio !== giro) return;
+      console.error('MeteoConsenso:', e);
+      var msg = MC.messaggioErrore(e);
+      if (!S.r || chiave !== MC.chiaveLuogo(S.luogo) || !leggiCache()) {
+        $('#ora').innerHTML = '<div class="carica">⚠️ ' + esc(msg) + '<br><br><button class="btn" id="riprova" type="button">Riprova</button></div>';
+        var b = $('#riprova'); if (b) b.onclick = function () { carica(true); };
+      }
+      avviso(S.r ? msg + ' Restano visibili le ultime previsioni salvate.' : msg, 7000);
     }).then(function () {
+      if (mio !== giro) return;
       S.carico = false;
       $('#btnRicarica').classList.remove('gira');
     });
