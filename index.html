@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>MeteoConsenso</title>
+  <meta name="description" content="Previsioni meteo di maggioranza: tutti i modelli a confronto, fino a 15 giorni.">
+  <meta name="theme-color" content="#0E1B33">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="tema-parziale">
+  <header class="top">
+    <button id="btnLuogo" class="luogo" type="button" aria-label="Cambia luogo">
+      <span class="pin">📍</span>
+      <span class="lt"><b id="nomeLuogo">…</b><small id="zonaLuogo"></small></span>
+      <span class="car">▾</span>
+    </button>
+    <div class="azioni">
+      <span data-update-slot></span>
+      <button id="btnRicarica" class="tondo" type="button" title="Ricarica previsioni" aria-label="Ricarica previsioni">⟳</button>
+      <button id="btnImpost" class="tondo" type="button" title="Dati da mostrare" aria-label="Impostazioni">⚙︎</button>
+    </div>
+  </header>
+
+  <main id="app">
+    <section id="ora" class="hero"><div class="carica">Raccolgo le previsioni di tutti i modelli…</div></section>
+    <section id="giorni" class="giorni" aria-label="Prossimi 15 giorni"></section>
+    <section id="dettaglio"></section>
+    <section id="tendenza"></section>
+    <section id="fonti"></section>
+    <footer class="piede">
+      Dati: modelli meteo via <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0) ·
+      aria e pollini: Copernicus CAMS · mari: modelli d'onda ECMWF/MeteoFrance/DWD.
+      <br>MeteoConsenso <span id="versione"></span>
+    </footer>
+  </main>
+
+  <div id="velo" class="velo" hidden></div>
+  <div id="foglio" class="foglio" hidden role="dialog" aria-modal="true"></div>
+  <div id="avviso" class="avviso" hidden></div>
+
+  <script src="js/fonti.js"></script>
+  <script src="js/icone.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/aggiornamenti.js" data-version="1.0.0" defer></script>
+  <script>
+    if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+  </script>
+</body>
+</html>

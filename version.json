@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "date": "2026-11-11",
+  "notes": [
+    "Prima versione di MeteoConsenso",
+    "Previsioni di maggioranza da 12 modelli meteo, fino a 15 giorni",
+    "Pressione, vento, pioggia, nuvole, UV, mari, laghi, pollini e polveri sottili",
+    "Luoghi preferiti e recenti, widget per la schermata Home"
+  ]
+}
