@@ -1,10 +1,10 @@
 {
-  "version": "1.0.1",
-  "date": "2026-11-11",
+  "version": "1.1.0",
+  "date": "2026-11-13",
   "notes": [
-    "Risolto: aggiornamento e cambio luogo che fallivano con \"problemi di connessione\"",
-    "Tutti i modelli ora arrivano con una sola richiesta, molto più leggera",
-    "Nuovo tentativo automatico se la rete o il servizio rispondono male",
-    "Messaggi di errore chiari e previsioni salvate sempre visibili"
+    "Widget grande per la schermata Home: adesso, prossime 24 ore e 10 giorni",
+    "La parte alta della home segue il giorno scelto (con mattina e pomeriggio)",
+    "Il meteo del giorno ora è ricavato dalle previsioni ora per ora: icona, massima e minima coincidono",
+    "Nelle impostazioni: istruzioni per mettere il widget sulla Home"
   ]
 }

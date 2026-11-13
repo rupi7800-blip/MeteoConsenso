@@ -17,6 +17,6 @@
     { "src": "icons/logo.svg", "sizes": "any", "type": "image/svg+xml" }
   ],
   "shortcuts": [
-    { "name": "Widget meteo", "short_name": "Widget", "url": "./widget.html", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+    { "name": "Widget meteo", "short_name": "Widget", "url": "./widget/", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

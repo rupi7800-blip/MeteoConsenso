@@ -4,8 +4,8 @@ Previsioni meteo di maggioranza: l'app confronta 12 modelli meteorologici (Itali
 
 - Dati selezionabili: meteo, pressione, vento, pioggia, nuvole, UV, mari, laghi, pollini, polveri sottili
 - Luoghi con memoria (preferiti e recenti), ricerca in Italia o nel mondo, GPS
-- Widget compatto: `widget.html`
+- Widget grande per la Home: `widget/` (installabile come icona separata "Meteo W")
 - Funziona offline con le ultime previsioni salvate
-- Sistema di aggiornamento: a ogni rilascio aumentare il numero in `version.json` e in `data-version` di `index.html` e `widget.html`
+- Sistema di aggiornamento: a ogni rilascio aumentare il numero in `version.json` e in `data-version` di `index.html` e `widget/index.html`
 
 Dati: [Open-Meteo](https://open-meteo.com/) (CC BY 4.0), Copernicus CAMS.

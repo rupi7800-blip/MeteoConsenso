@@ -339,6 +339,7 @@
         ore: oreG
       };
     }).filter(function (g) { return g.n > 0; });
+    giorni.forEach(allineaAlleOre);
 
     return {
       creato: Date.now(),
@@ -350,6 +351,103 @@
     };
   }
   MC.costruisciConsenso = costruisciConsenso;
+
+  /* ---------- giorno coerente con le ore ----------
+     Il codice "tempo del giorno" dei modelli indica il fenomeno PIÙ intenso delle 24 ore
+     (un piovasco alle 3 di notte = icona pioggia per tutto il giorno). Qui il tempo del
+     giorno si ricava dalle previsioni ora per ora di maggioranza, contando soprattutto
+     le ore di luce, così giorno e ore dicono la stessa cosa. */
+  function allineaAlleOre(g) {
+    var ore = g.ore.filter(function (o) { return o.voto; });
+    if (ore.length < 6) return;   // troppe poche ore: resta il voto giornaliero dei modelli
+    var alba = g.alba ? g.alba.slice(11, 13) + ':00' : '07:00', tramonto = g.tramonto ? g.tramonto.slice(11, 16) : '18:00';
+    function peso(o) { var h = o.t.slice(11, 16); return h >= alba && h <= tramonto ? 1 : 0.4; }
+    var tot = 0, bagnato = 0, cont = {}, temporali = 0;
+    ore.forEach(function (o) {
+      var w = peso(o), c = o.voto.cat;
+      tot += w; cont[c] = (cont[c] || 0) + w;
+      if (BAGNATO[c]) bagnato += w;
+      if (c === 'temporale') temporali += w;
+    });
+    var cat;
+    // giornata "bagnata" se piove per almeno ~3 ore di luce (o il 25% della giornata)
+    if (bagnato >= Math.max(2.5, tot * 0.25)) {
+      if (temporali >= 1.5) cat = 'temporale';
+      else {
+        var best = null, bn = -1;
+        ['pioggia', 'neve', 'pioggerella'].forEach(function (c) { if ((cont[c] || 0) > bn) { bn = cont[c] || 0; best = c; } });
+        cat = best;
+      }
+    } else {
+      // nuvolosità: mediana pesata delle ore asciutte (soprattutto quelle di luce)
+      var secche = ore.filter(function (o) { return !BAGNATO[o.voto.cat]; });
+      var nebbia = secche.reduce(function (a, o) { return a + (o.voto.cat === 'nebbia' ? peso(o) : 0); }, 0);
+      var totS = secche.reduce(function (a, o) { return a + peso(o); }, 0);
+      if (totS && nebbia > totS / 2) cat = 'nebbia';
+      else {
+        var lista = secche.map(function (o) { return { i: o.voto.cat === 'nebbia' ? 3 : ORDINE_SECCO.indexOf(o.voto.cat), w: peso(o) }; }).sort(function (a, b) { return a.i - b.i; });
+        var acc = 0; cat = 'parziale';
+        for (var k = 0; k < lista.length; k++) { acc += lista[k].w; if (acc >= totS / 2) { cat = ORDINE_SECCO[lista[k].i]; break; } }
+        // qualche ora di pioggia in una giornata asciutta: almeno "parzialmente nuvoloso"
+        if (bagnato > 0 && ORDINE_SECCO.indexOf(cat) < 2) cat = 'parziale';
+      }
+    }
+    // accordo = media dell'accordo dei modelli nelle singole ore (pesata sulle ore di luce),
+    // così è coerente con le previsioni ora per ora mostrate
+    var qs = 0, qw = 0;
+    ore.forEach(function (o) { var w = peso(o); qs += o.voto.quota * w; qw += w; });
+    var quotaOre = qw ? qs / qw : (g.voto ? g.voto.quota : 0.5);
+    if (g.voto) g.voto = Object.assign({}, g.voto, { cat: cat, quota: quotaOre });
+    else g.voto = { cat: cat, quota: quotaOre, esatti: 1, n: g.n, bagnati: 0, temporale: 0, conteggio: {} };
+    // fasce orarie con pioggia (es. "02–04"), per spiegarle anche in una giornata asciutta
+    var fasce = [], inizio = null, prec = null;
+    ore.forEach(function (o) {
+      var h = +o.t.slice(11, 13), b = !!BAGNATO[o.voto.cat];
+      if (b && inizio == null) inizio = h;
+      if (!b && inizio != null) { fasce.push([inizio, prec + 1]); inizio = null; }
+      prec = h;
+    });
+    if (inizio != null) fasce.push([inizio, prec + 1]);
+    g.fascePioggia = fasce;
+    g.oreBagnate = Math.round(ore.filter(function (o) { return BAGNATO[o.voto.cat]; }).length);
+    // massima e minima del giorno = quelle della curva oraria (la fascia resta quella dei modelli)
+    if (g.ore.length >= 20) {
+      var t = g.ore.map(function (o) { return o.temp && o.temp.med; }).filter(function (x) { return x != null; });
+      if (t.length >= 20 && g.tmax && g.tmin) {
+        g.tmax = Object.assign({}, g.tmax, { med: Math.max.apply(null, t) });
+        g.tmin = Object.assign({}, g.tmin, { med: Math.min.apply(null, t) });
+        g.tmax.min = Math.min(g.tmax.min, g.tmax.med); g.tmax.max = Math.max(g.tmax.max, g.tmax.med);
+        g.tmin.min = Math.min(g.tmin.min, g.tmin.med); g.tmin.max = Math.max(g.tmin.max, g.tmin.med);
+      }
+    }
+    // il punteggio di affidabilità usa la nuova quota di accordo
+    var spread = g.tmax ? g.tmax.max - g.tmax.min : 0;
+    g.affidabilita = g.voto.quota * 0.45 + Math.max(0, 1 - spread / 8) * 0.35 + Math.min(1, g.n / 7) * 0.2;
+  }
+  MC.allineaAlleOre = allineaAlleOre;
+
+  /* ---------- riassunto per il widget (usato da app e widget) ---------- */
+  MC.riassuntoWidget = function (c, luogo) {
+    var adesso = MC.oraLocale(c.offset);
+    var o = c.ore.filter(function (x) { return x.t <= adesso; }).pop() || c.ore[0];
+    function notte(x) {
+      var g = c.giorni.filter(function (d) { return d.data === x.t.slice(0, 10); })[0];
+      if (!g || !g.alba) { var h = +x.t.slice(11, 13); return h < 7 || h >= 18; }
+      return x.t < g.alba.slice(0, 13) + ':00' || x.t > g.tramonto;
+    }
+    var i0 = c.ore.indexOf(o);
+    return {
+      luogo: luogo, quando: Date.now(),
+      ora: o ? { temp: o.temp && o.temp.med, perc: o.perc && o.perc.med, cat: o.voto && o.voto.cat, notte: notte(o), pioggia: o.probPioggia, vento: o.vento && o.vento.med, dir: o.dir, umid: o.umid && o.umid.med } : null,
+      ore: c.ore.slice(Math.max(0, i0), Math.max(0, i0) + 24).map(function (x) {
+        return { t: x.t, temp: x.temp && x.temp.med, cat: x.voto && x.voto.cat, notte: notte(x), prob: x.probPioggia };
+      }),
+      giorni: c.giorni.slice(0, 10).map(function (g) {
+        return { data: g.data, cat: g.voto && g.voto.cat, max: g.tmax && g.tmax.med, min: g.tmin && g.tmin.med, prob: g.probPioggia, mm: g.pioggia && g.pioggia.med, aff: g.affidabilita, n: g.n, vento: g.vento && g.vento.med, alba: g.alba, tramonto: g.tramonto };
+      })
+    };
+  };
+
 
   /* ---------- ora locale del luogo ---------- */
   MC.oraLocale = function (offset) {

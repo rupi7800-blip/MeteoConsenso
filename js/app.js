@@ -95,7 +95,7 @@
   function leggiCache() {
     var c = MC.leggi(chiaveCache(), null);
     if (!c || !c.consenso) return null;
-    c.consenso.giorni.forEach(function (g) { g.ore = c.consenso.ore.filter(function (o) { return o.t.slice(0, 10) === g.data; }); });
+    c.consenso.giorni.forEach(function (g) { g.ore = c.consenso.ore.filter(function (o) { return o.t.slice(0, 10) === g.data; }); MC.allineaAlleOre(g); });
     return c;
   }
   function salvaCache(r) {
@@ -111,14 +111,8 @@
   }
   function salvaWidget() {
     var c = S.r && S.r.consenso; if (!c) return;
-    var o = oraCorrente();
-    MC.scrivi('widget', {
-      luogo: S.luogo, quando: S.r.quando,
-      ora: o ? { temp: o.temp && o.temp.med, cat: o.voto && o.voto.cat, notte: notteOra(o, giornoDi(o.t)), pioggia: o.probPioggia } : null,
-      giorni: c.giorni.slice(0, 6).map(function (g) {
-        return { data: g.data, cat: g.voto && g.voto.cat, max: g.tmax && g.tmax.med, min: g.tmin && g.tmin.med, prob: g.probPioggia, aff: g.affidabilita, n: g.n };
-      })
-    });
+    var w = MC.riassuntoWidget(c, S.luogo); w.quando = S.r.quando;
+    MC.scrivi('widget', w);
   }
 
   /* ---------- caricamento ---------- */
@@ -191,18 +185,24 @@
     disegnaFonti();
   }
 
+  // La parte alta della home segue il giorno scelto: "Oggi" = condizioni di adesso,
+  // un altro giorno = il riassunto di quel giorno (stessi dati della scheda e delle ore).
   function disegnaOra() {
-    var o = oraCorrente(), g0 = S.r.consenso.giorni[0];
+    var gg = S.r.consenso.giorni, g = gg[S.giorno] || gg[0];
+    if (S.giorno > 0 && g) return disegnaGiornoInAlto(g);
+    var o = oraCorrente(), g0 = gg[0];
     if (!o) return;
     var notte = notteOra(o, giornoDi(o.t));
     var cat = o.voto ? o.voto.cat : 'parziale';
     document.body.className = 'tema-' + cat + (notte ? ' notte' : '');
     var vecchio = Date.now() - S.r.quando;
     var quando = vecchio < 90000 ? 'adesso' : 'alle ' + new Date(S.r.quando).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-    var h = '<div class="grande">' + MC.icona(cat, notte, 96) + '<div class="temp">' + f0(o.temp.med) + '°</div></div>' +
+    var catG = g0 && g0.voto ? g0.voto.cat : null;
+    var h = '<div class="eti">Adesso · ' + dataIt(o.t.slice(0, 10), { weekday: 'long', day: 'numeric', month: 'long' }) + '</div>' +
+      '<div class="grande">' + MC.icona(cat, notte, 96) + '<div class="temp">' + f0(o.temp.med) + '°</div></div>' +
       '<div class="desc">' + MC.TESTI[cat] + '</div>' +
       '<div class="sub">Percepita ' + f0(o.perc && o.perc.med) + '° · modelli tra ' + f0(o.temp.min) + '° e ' + f0(o.temp.max) + '°</div>' +
-      (g0 ? '<div class="sub">Oggi ↑ ' + f0(g0.tmax && g0.tmax.med) + '° ↓ ' + f0(g0.tmin && g0.tmin.med) + '° · alba ' + ora(g0.alba) + ' · tramonto ' + ora(g0.tramonto) + '</div>' : '') +
+      (g0 ? '<div class="sub">Oggi ' + (catG ? MC.TESTI[catG].toLowerCase() + ' · ' : '') + '↑ ' + f0(g0.tmax && g0.tmax.med) + '° ↓ ' + f0(g0.tmin && g0.tmin.med) + '° · alba ' + ora(g0.alba) + ' · tramonto ' + ora(g0.tramonto) + '</div>' : '') +
       '<div class="chips">' +
       (o.voto ? '<span class="chip">🗳️ ' + Math.round(o.voto.quota * o.voto.n) + ' su ' + o.voto.n + ' modelli d\'accordo</span>' : '') +
       (g0 ? '<span class="chip ' + classeAff(g0.affidabilita) + '">Affidabilità oggi: ' + MC.etichettaAffidabilita(g0.affidabilita) + '</span>' : '') +
@@ -211,6 +211,45 @@
       '<span class="chip">🕑 ' + quando + '</span>' +
       '</div>';
     $('#ora').innerHTML = h;
+  }
+
+  function disegnaGiornoInAlto(g) {
+    var cat = g.voto ? g.voto.cat : 'parziale';
+    document.body.className = 'tema-' + cat;
+    var oreLuce = g.ore.filter(function (o) { var h = +o.t.slice(11, 13); return h >= 8 && h <= 18; });
+    var mattina = oreLuce.filter(function (o) { return +o.t.slice(11, 13) < 13; });
+    var pome = oreLuce.filter(function (o) { return +o.t.slice(11, 13) >= 13; });
+    function fascia(lista) {
+      var v = MC.vota(lista.map(function (o) { return o.voto && o.voto.cat; }));
+      return v ? v.cat : null;
+    }
+    var cm = fascia(mattina), cp = fascia(pome);
+    var bf = MC.beaufort(g.vento && g.vento.med);
+    var h = '<div class="eti">' + nomeGiorno(S.giorno, g.data) + (S.giorno > 1 ? '' : ' · ' + dataIt(g.data, { weekday: 'long', day: 'numeric' })) + ' · ' + dataIt(g.data, { month: 'long' }) + '</div>' +
+      '<div class="grande">' + MC.icona(cat, false, 96) + '<div class="temp">' + f0(g.tmax && g.tmax.med) + '°<span class="tmin">' + f0(g.tmin && g.tmin.med) + '°</span></div></div>' +
+      '<div class="desc">' + MC.TESTI[cat] + '</div>' +
+      (g.fascePioggia && g.fascePioggia.length ? '<div class="sub">☔ ' + (MC.TESTI[cat] && /piogg|tempor|neve/i.test(cat) ? 'Precipitazioni' : 'Precipitazioni brevi') + ' ' +
+        g.fascePioggia.map(function (f) { return ('0' + f[0]).slice(-2) + '–' + ('0' + Math.min(24, f[1])).slice(-2); }).join(', ') + '</div>' : '') +
+      (cm && cp ? '<div class="sub">Mattina ' + MC.TESTI[cm].toLowerCase() + ' · pomeriggio ' + MC.TESTI[cp].toLowerCase() + '</div>' : '') +
+      '<div class="sub">' + [
+        S.dati.pioggia ? '💧 ' + pc(g.probPioggia) + (g.pioggia && g.pioggia.med >= 0.5 ? ' · ' + f1(g.pioggia.med) + ' mm' : '') : '',
+        S.dati.vento && g.vento ? MC.freccia(g.dir, 13) + ' ' + f0(g.vento.med) + ' km/h' + (bf ? ' (' + bf.nome.toLowerCase() + ')' : '') : '',
+        g.alba ? '🌅 ' + ora(g.alba) + ' – ' + ora(g.tramonto) : ''
+      ].filter(Boolean).join(' · ') + '</div>' +
+      '<div class="chips">' +
+      (g.voto ? '<span class="chip">🗳️ ' + Math.round(g.voto.quota * 100) + '% dei modelli d\'accordo</span>' : '') +
+      '<span class="chip ' + classeAff(g.affidabilita) + '">Affidabilità: ' + MC.etichettaAffidabilita(g.affidabilita) + '</span>' +
+      '<button class="chip btnchip" id="tornaOggi" type="button">↩ Torna ad adesso</button>' +
+      '</div>';
+    $('#ora').innerHTML = h;
+    $('#tornaOggi').onclick = function () { scegliGiorno(0); };
+  }
+
+  function scegliGiorno(i) {
+    S.giorno = i;
+    disegnaOra(); disegnaGiorni(); disegnaDettaglio();
+    var hero = $('#ora');
+    if (hero.getBoundingClientRect().top < 0) window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function disegnaGiorni() {
@@ -224,7 +263,7 @@
         '<div class="pp">' + (g.probPioggia ? '💧' + pc(g.probPioggia) : '') + '</div></button>';
     }).join('');
     Array.prototype.forEach.call(document.querySelectorAll('.gg'), function (b) {
-      b.onclick = function () { S.giorno = +b.dataset.i; disegnaGiorni(); disegnaDettaglio(); };
+      b.onclick = function () { scegliGiorno(+b.dataset.i); };
     });
     var sel = document.querySelector('.gg.sel');
     if (sel && sel.scrollIntoView && S.giorno > 2) sel.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
@@ -518,8 +557,8 @@
       '<h4>Modelli da mettere a confronto</h4><div class="interr modelli">' + MC.MODELLI.map(function (m) {
         return '<label><input type="checkbox" data-mod="' + m.id + '"' + (S.modelli[m.id] === false ? '' : ' checked') + '> ' + esc(m.nome) + '<small>' + esc(m.paese) + ' · ' + m.giorni + ' gg</small></label>';
       }).join('') + '</div>' +
-      '<h4>Widget</h4><p class="nota" style="margin-top:0">Apri la versione compatta e aggiungila alla schermata Home (menu del browser → "Aggiungi a schermata Home"): avrai un riquadro con il meteo del luogo scelto.</p>' +
-      '<p><a class="btn sec" style="display:inline-block;text-decoration:none" href="widget.html">Apri il widget</a></p>' +
+      '<h4>Widget grande per la Home</h4><p class="nota" style="margin-top:0">Apri il widget e dal menu del browser (⋮) scegli <b>"Installa app"</b> o <b>"Aggiungi a schermata Home"</b>: comparirà l\'icona "Meteo W" che apre il pannello grande (adesso, 24 ore, 10 giorni) del luogo scelto qui. In alternativa tieni premuta l\'icona di MeteoConsenso e trascina "Widget meteo" sulla Home.</p>' +
+      '<p><a class="btn sec" style="display:inline-block;text-decoration:none" href="widget/">Apri il widget</a></p>' +
       '<p style="margin-top:18px"><button class="btn" id="btnApplica" type="button">Applica</button></p>');
     $('#btnApplica').onclick = function () {
       var primaD = JSON.stringify(S.dati), primaM = JSON.stringify(S.modelli);
@@ -544,7 +583,7 @@
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') chiudiFoglio(); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) carica(false); });
   window.addEventListener('online', function () { carica(false); });
-  setInterval(function () { if (S.r) disegnaOra(); }, 5 * 60 * 1000);
+  setInterval(function () { if (S.r && S.giorno === 0) disegnaOra(); }, 5 * 60 * 1000);
 
   var v = document.querySelector('script[data-version]');
   $('#versione').textContent = v ? 'v' + v.dataset.version : '';

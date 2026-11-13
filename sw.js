@@ -6,7 +6,7 @@
    e l'app tiene l'ultima copia in memoria locale per l'uso offline. */
 const CACHE = 'meteoconsenso-app';
 const ASSETS = [
-  './', './index.html', './widget.html', './css/style.css',
+  './', './index.html', './widget/', './widget/index.html', './widget/manifest.webmanifest', './css/style.css', './css/widget.css',
   './js/fonti.js', './js/icone.js', './js/app.js', './js/widget.js', './js/aggiornamenti.js',
   './manifest.webmanifest', './icons/logo.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-180.png'
 ];
@@ -44,8 +44,12 @@ self.addEventListener('fetch', e => {
   if (url.origin !== self.location.origin) return;          // API meteo: sempre dalla rete
   if (url.pathname.endsWith('version.json')) return;         // controllo aggiornamenti: sempre dalla rete
 
+  if (req.mode === 'navigate' && url.pathname.endsWith('/widget.html')) {
+    e.respondWith(Response.redirect(new URL('./widget/', self.registration.scope).href, 302));
+    return;
+  }
   if (req.mode === 'navigate') {
-    const pagina = url.pathname.endsWith('widget.html') ? './widget.html' : './index.html';
+    const pagina = url.pathname.indexOf('/widget/') >= 0 ? './widget/index.html' : './index.html';
     e.respondWith(
       caches.match(pagina).then(hit => hit || fromNetwork(req, pagina)).catch(() => caches.match(pagina))
     );

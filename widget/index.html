@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Meteo · Widget</title>
+  <meta name="theme-color" content="#0E1B33">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="../icons/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Meteo Widget">
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/widget.css">
+</head>
+<body class="tema-parziale wbody">
+  <main id="w" class="wg"><div class="carica">Carico il meteo…</div></main>
+  <div class="wbar">
+    <a class="tondo wlink" href="../" title="Apri l'app completa" aria-label="Apri l'app completa">↗</a>
+    <span data-update-slot></span>
+    <button class="tondo" id="rw" type="button" title="Aggiorna dati" aria-label="Aggiorna dati">⟳</button>
+  </div>
+  <script src="../js/fonti.js"></script>
+  <script src="../js/icone.js"></script>
+  <script src="../js/widget.js"></script>
+  <script src="../js/aggiornamenti.js" data-version="1.1.0" data-version-url="../version.json" defer></script>
+  <script>
+    if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('../sw.js', { scope: '../' }).catch(function () {}); });
+  </script>
+</body>
+</html>
